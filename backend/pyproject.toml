@@ -1,0 +1,21 @@
+[project]
+name = "backend"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["fastapi[standard]>=0.141.1", "sqlmodel>=0.0.39"]
+
+[tool.ruff]
+# Target Python version
+target-version = "py311"
+# Match Black's default line length layout
+line-length = 88
+
+[tool.ruff.lint]
+# Enable Pyflakes (F), Pycodestyle (E, W), isort (I), and Flake8-Bugbear (B)
+select = ["F", "E", "W", "I", "B"]
+# Ignore rules that conflict with the Ruff formatter
+ignore = []
+
+[tool.ruff.lint.isort]
+# Ensure imports group cleanly for FastAPI structures
+combine-as-imports = true
