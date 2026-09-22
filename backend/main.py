@@ -1,18 +1,22 @@
 from asyncio import CancelledError, Task, create_task, sleep
 from logging import getLogger
+from os import getenv
 from traceback import print_exception
 from typing import Literal
 from uuid import UUID, uuid4
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, ConfigDict
+from pydantic.alias_generators import to_camel
 
 app = FastAPI()
 logger = getLogger("uvicorn.error")
+load_dotenv()
 
 origins = [
-    "http://localhost:5173",  # Local Vite frontend
-    "https://yourfrontend.com",  # Production frontend
+    getenv("FRONTEND_URL") or "http://localhost:5173/",
 ]
 
 app.add_middleware(
@@ -35,25 +39,18 @@ class Room:
         self.is_timer_active: bool = False
         self.started_by: str | None = None
         self.total_time: int = 0
-        self.timer: Task | None = None
+        self.timer: Task[None] | None = None
 
     def get_payload(self):
-        return {
-            "roomId": str(self.room_id),
-            "memberList": list(self.member_list.values()),
-            "timerMode": self.timer_mode,
-            "isPaused": self.is_paused,
-            "isTimerActive": self.is_timer_active,
-            "startedBy": self.started_by,
-            "timeRemaining": self.time_remaining,
-            "totalTime": self.total_time,
-        }
+        return RoomPayload.from_room(self)
 
     async def broadcast(self):
-        dead = []
+        dead: list[WebSocket] = []
         for conn in self.member_list:
             try:
-                await conn.send_json(self.get_payload())
+                await conn.send_json(
+                    self.get_payload().model_dump(mode="json", by_alias=True)
+                )
             except Exception as exc:
                 print_exception(type(exc), exc, exc.__traceback__)
                 dead.append(conn)
@@ -96,14 +93,39 @@ class Room:
         self.is_paused = False
 
 
+class RoomPayload(BaseModel):
+    room_id: str
+    member_list: list[str]
+    timer_mode: Literal["focus", "break"]
+    is_paused: bool
+    is_timer_active: bool
+    started_by: str | None
+    time_remaining: int
+    total_time: int
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+    @classmethod
+    def from_room(cls, room: Room):
+        return cls(
+            room_id=str(room.room_id),
+            member_list=list(room.member_list.values()),
+            timer_mode=room.timer_mode,
+            is_paused=room.is_paused,
+            is_timer_active=room.is_timer_active,
+            started_by=room.started_by,
+            time_remaining=room.time_remaining,
+            total_time=room.total_time,
+        )
+
+
 class RoomConnectionManager:
     def __init__(self):
         self.active_rooms: dict[UUID, Room] = {}
 
     async def disconnect(self, room_id: UUID, websocket: WebSocket):
-        if self.active_rooms.get(room_id) and self.active_rooms.get(
-            room_id
-        ).member_list.get(websocket):
+        room = self.active_rooms.get(room_id)
+        if room and room.member_list.get(websocket):
             del self.active_rooms[room_id].member_list[websocket]
             if not self.active_rooms[room_id].member_list:
                 del self.active_rooms[room_id]
@@ -126,7 +148,8 @@ def create_room():
 async def join_room(websocket: WebSocket, room_id: UUID):
     await websocket.accept()
     logger.info(f"Attemping to join room {room_id}")
-    if not manager.active_rooms.get(room_id):
+    room = manager.active_rooms.get(room_id)
+    if not room:
         await websocket.close(code=4044, reason="Room does not exist")
         return
     try:
@@ -134,44 +157,36 @@ async def join_room(websocket: WebSocket, room_id: UUID):
             data = await websocket.receive_json()
             command = data.get("command")
 
-            if command == "start":
-                if manager.active_rooms.get(room_id):
-                    started_by = manager.active_rooms.get(room_id).member_list.get(
-                        websocket
-                    )
-                    manager.active_rooms.get(room_id).start(started_by)
-                    await manager.active_rooms.get(room_id).broadcast()
+            room = manager.active_rooms.get(room_id)
+            if room is not None:
+                if command == "start":
+                    started_by = room.member_list.get(websocket)
+                    room.start(started_by)
+                    await room.broadcast()
 
-            elif command == "pause":
-                if manager.active_rooms.get(room_id):
-                    manager.active_rooms.get(room_id).pause()
-                    await manager.active_rooms.get(room_id).broadcast()
+                elif command == "pause":
+                    room.pause()
+                    await room.broadcast()
 
-            elif command == "resume":
-                if manager.active_rooms.get(room_id):
-                    manager.active_rooms.get(room_id).resume()
-                    await manager.active_rooms.get(room_id).broadcast()
+                elif command == "resume":
+                    room.resume()
+                    await room.broadcast()
 
-            elif command == "join_room":
-                if manager.active_rooms.get(room_id) and data.get("name"):
-                    logger.info(manager.active_rooms.get(room_id).get_payload())
-                    manager.active_rooms.get(room_id).member_list[websocket] = data.get(
-                        "name"
-                    )
-                    await manager.active_rooms.get(room_id).broadcast()
+                elif command == "join_room":
+                    if data.get("name"):
+                        room.member_list[websocket] = data.get("name")
+                        await room.broadcast()
 
-            elif command == "set_total_time":
-                if manager.active_rooms.get(room_id):
-                    logger.info(manager.active_rooms.get(room_id).get_payload())
-                    manager.active_rooms.get(room_id).total_time = data.get(
-                        "total_time"
-                    )
-                    await manager.active_rooms.get(room_id).broadcast()
+                elif command == "set_total_time":
+                    room.total_time = data.get("total_time")
+                    await room.broadcast()
 
     except WebSocketDisconnect:
         pass
     finally:
         logger.info(f"Websocket disconnected from room {room_id}")
         await manager.disconnect(room_id, websocket)
-        if manager.active_rooms.get(room_id):
-            await manager.active_rooms.get(room_id).broadcast()
+
+        room = manager.active_rooms.get(room_id)
+        if room:
+            await room.broadcast()

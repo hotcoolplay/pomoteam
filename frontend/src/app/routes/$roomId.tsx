@@ -36,7 +36,7 @@ function Room() {
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
-    const socket = new WebSocket(`http://127.0.0.1:8000/ws/${roomId}`);
+    const socket = new WebSocket(`${import.meta.env.VITE_API_URL ?? ''}/ws/${roomId}`);
     wsRef.current = socket;
 
     socket.onmessage = (event) => {

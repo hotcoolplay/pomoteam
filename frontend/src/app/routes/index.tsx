@@ -10,7 +10,7 @@ function IndexComponent() {
 
   useEffect(() => {
     const createRoom = async () => {
-      const response = await fetch('http://127.0.0.1:8000/create-room', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL ?? ''}/create-room`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
