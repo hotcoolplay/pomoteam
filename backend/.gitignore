@@ -1,0 +1,41 @@
+# === Python Cache & Bytecode ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# === Virtual Environments ===
+.venv/
+venv/
+ENV/
+env/
+# uv environment if used
+.uv/
+
+# === Environment Variables & Secrets ===
+.env
+.env.*
+!.env.example
+secrets.toml
+
+# === Database & Local Storage ===
+*.db
+*.sqlite3
+/data/
+
+# === FastAPI & Linting Tools ===
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# === Database Migrations (Optional) ===
+# Only uncomment this if you generate local alembic history you don't want to sync
+# alembic.ini
+
+# === IDEs & OS Specific ===
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
